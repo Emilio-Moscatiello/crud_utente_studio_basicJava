@@ -76,6 +76,26 @@ public class Database {
 }
 
 /*
+ * ALTRO ESEMPIO DI CODICE PER COLLEGARE BE AL DB
+ * public class DatabaseConnection {
+ * 
+ * private static final String URL =
+ * "jdbc:postgresql://localhost:5432/turista_facoltoso";
+ * private static final String USER = "postgres";
+ * private static final String PASSWORD = "1234";
+ * 
+ * private DatabaseConnection() {
+ * // impedisce l’istanziazione
+ * }
+ * 
+ * public static Connection getConnection() throws SQLException {
+ * return DriverManager.getConnection(URL, USER, PASSWORD);
+ * }
+ * }
+ * è un codice basico, può essere ottimizzato
+ */
+
+/*
  * 3. L’infrastruttura: config/Database.java
  * Database.java incapsula la connessione al database. Contiene URL, utente e
  * password. Utente e password possono essere letti da variabili d’ambiente
