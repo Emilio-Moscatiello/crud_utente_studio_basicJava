@@ -1,0 +1,65 @@
+1. Il punto di ingresso: App.java
+L’applicazione inizia in App.java. Il metodo main crea un UtenteController, chiama run() e gestisce eventuali SQLException. Se la connessione al database fallisce o il driver non è disponibile, l’errore viene stampato e il programma termina.
+
+2. La definizione del progetto: pom.xml
+Maven descrive il progetto nel pom.xml. Qui troviamo: identità del progetto (groupId, artifactId, version), versione di Java (17) e le dipendenze.
+Senza il driver JDBC per PostgreSQL, Java non potrebbe parlare con il database. La dipendenza postgresql fornisce il driver e la classe org.postgresql.Driver necessaria a JDBC. JUnit è usata solo nei test e non nell’esecuzione principale.
+
+3. L’infrastruttura: config/Database.java
+Database.java incapsula la connessione al database. Contiene URL, utente e password. Utente e password possono essere letti da variabili d’ambiente (PG_USER, PG_PASSWORD), altrimenti si usano i valori di default.
+Nel blocco static viene caricato il driver PostgreSQL con Class.forName. Se la libreria non è nel classpath, viene lanciata una RuntimeException subito all’avvio.
+getConnection() apre una nuova connessione tramite DriverManager.getConnection. Ogni chiamata crea una connessione nuova; in un’applicazione più complessa si userebbe un pool di connessioni.
+initSchema esegue la creazione della tabella utenti tramite CREATE TABLE IF NOT EXISTS. Così la struttura esiste sempre, senza creare errori se la tabella è già presente. I campi sono: id (BIGSERIAL, chiave primaria), nome, cognome, email (UNIQUE), telefono, created_at, updated_at.
+
+4. L’entità di dominio: model/Utente.java
+Utente è un POJO (Plain Old Java Object). Non ha annotazioni JPA né dipendenze esterne: solo campi e getter/setter.
+Ogni campo corrisponde a una colonna della tabella. id è l’identificatore. nome e cognome sono i dati anagrafici. email identifica univocamente l’utente. telefono è opzionale. createdAt e updatedAt tengono traccia di creazione e aggiornamento.
+Questa classe rappresenta l’utente nel dominio dell’applicazione. Viene usata all’interno del repository e del service, ma non direttamente verso l’esterno.
+
+5. I contratti di dati: dto/UtenteRequest e UtenteResponse
+I DTO (Data Transfer Object) definiscono cosa entra e cosa esce dall’applicazione.
+UtenteRequest contiene solo nome, cognome, email, telefono. Non ha id né date, perché sono dati di creazione o modifica inseriti dall’utente. Il controller riempie questo oggetto e lo passa al service.
+UtenteResponse ha tutti i campi, incluso id, createdAt e updatedAt. Viene usato quando si restituiscono dati all’utente (es. dopo una lettura o un salvataggio). Così l’utente vede l’entità completa con le date gestite dal sistema.
+Separare Request e Response permette di cambiare la struttura del dominio senza modificare i contratti con l’esterno, e viceversa.
+
+6. L’accesso ai dati: repository/UtenteRepository.java
+UtenteRepository traduce le operazioni CRUD in istruzioni SQL e gestisce il mapping tra database e oggetti Utente.
+Ogni metodo apre una connessione con Database.getConnection(), usa try-with-resources per chiuderla e chiude anche PreparedStatement e ResultSet. In questo modo non ci sono connessioni lasciate aperte.
+Il metodo save esegue un INSERT. Con Statement.RETURN_GENERATED_KEYS il database restituisce l’id generato (BIGSERIAL). Il repository legge questo valore e lo imposta sull’oggetto Utente, insieme a createdAt e updatedAt.
+findAll esegue una SELECT ordinata per id e, per ogni riga, chiama mapRow per costruire un Utente.
+findById usa una SELECT con WHERE id = ? e restituisce un Optional<Utente>, vuoto se non trova righe.
+existsByEmail e existsByEmailAndIdNot eseguono SELECT 1 per verificare l’esistenza di record. Sono usate dal service per validare l’unicità dell’email prima di creare o aggiornare.
+update fa una UPDATE impostando i campi modificati e updated_at. deleteById esegue una DELETE e restituisce true se è stata eliminata almeno una riga.
+mapRow converte una riga di ResultSet in un Utente, leggendo le colonne per nome. rs.getObject("created_at", LocalDateTime.class) mappa direttamente i timestamp SQL alle date Java.
+
+7. La logica di business: service/UtenteService.java
+UtenteService coordina le operazioni e applica le regole di business. Non accede al database direttamente, ma solo tramite il repository. Riceve e restituisce DTO, e usa internamente gli oggetti Utente.
+Nel metodo create, prima controlla se esiste già un utente con la stessa email. Se sì, lancia IllegalArgumentException. Altrimenti crea un Utente dai campi della request, lo salva tramite il repository e restituisce un UtenteResponse tramite toResponse.
+findAll recupera tutti gli utenti e li trasforma in UtenteResponse.
+findById usa repository.findById(id). Se l’Optional è vuoto, lancia un’eccezione con un messaggio esplicito. Se è pieno, converte l’Utente in UtenteResponse.
+Nel metodo update controlla che l’utente esista e che la nuova email non sia già usata da un altro utente (escludendo l’id in modifica). Se tutto è valido, aggiorna i campi dell’Utente, chiama il repository per la UPDATE e restituisce un UtenteResponse.
+delete verifica che l’utente esista prima di cancellarlo; in caso contrario lancia un’eccezione.
+Il metodo toResponse copia i campi da un Utente a un UtenteResponse. È privato e usato da tutti i metodi che devono restituire un utente.
+
+8. L’interfaccia utente: controller/UtenteController.java
+Il controller gestisce l’interazione con l’utente tramite la console. All’inizio di run chiama Database.initSchema per assicurarsi che la tabella esista, poi entra in un ciclo che mostra il menu e gestisce la scelta.
+Il menu offre: crea utente, elenco utenti, cerca per id, modifica, elimina, esci. La scelta viene letta con Scanner.nextLine() e gestita con uno switch. Ogni opzione richiama un metodo privato specifico.
+create legge i dati con leggiDatiUtente, costruisce un UtenteRequest, chiama service.create e stampa il risultato. In caso di IllegalArgumentException (es. email duplicata), stampa il messaggio di errore invece di far terminare il programma.
+findAll riceve la lista di UtenteResponse e la stampa in modo leggibile. Se la lista è vuota, viene mostrato un messaggio appropriato.
+findById chiede l’id, lo converte in long, chiama service.findById e stampa il risultato. Gestisce NumberFormatException (id non numerico) e IllegalArgumentException (utente non trovato).
+update chiede l’id e i nuovi dati, poi chiama service.update e mostra un messaggio di conferma o errore.
+delete chiede l’id, chiama service.delete e conferma l’operazione.
+leggiDatiUtente crea un UtenteRequest, chiede nome, cognome, email e telefono alla console, assegna i valori e restituisce l’oggetto. È usato sia in create sia in update.
+
+9. Il flusso complessivo
+L’ordine di creazione e collegamento è questo:
+pom.xml – definisce le dipendenze e il contesto di build.
+Database – fornisce connessione e creazione schema; è usato da Repository e Controller.
+Utente – entità di dominio usata da Repository e Service.
+UtenteRequest e UtenteResponse – DTO usati da Service e Controller.
+UtenteRepository – usa Database e Utente, espone operazioni CRUD.
+UtenteService – usa Repository, Utente e DTO, applica le regole di business.
+UtenteController – usa Service, DTO e Database (solo per init), gestisce l’interazione console.
+App – avvia tutto creando il Controller e chiamando run.
+Quando l’utente sceglie “Crea utente”, il Controller legge i dati, crea un UtenteRequest e chiama service.create. Il Service controlla l’email, crea un Utente, lo salva tramite il Repository con una INSERT, riceve l’oggetto con id e date, lo trasforma in UtenteResponse e lo restituisce al Controller, che lo mostra in console.
+La stessa logica si applica a lettura, aggiornamento ed eliminazione: il Controller riceve input e mostra output, il Service applica le regole e orchestra le operazioni, il Repository esegue le query SQL e mappa i risultati sugli oggetti Utente.
